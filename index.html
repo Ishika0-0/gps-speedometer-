@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS Speed Tracker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #output {
+            margin-top: 20px;
+        }
+        .output-item {
+            margin: 5px 0;
+        }
+        #summary {
+            margin-top: 30px;
+            border-top: 1px solid #ccc;
+            padding-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>GPS Speed Tracker</h1>
+    <button id="startTracking">Start Tracking</button>
+    <button id="stopTracking" disabled>Stop Tracking</button>
+
+    <div id="output">
+        <div class="output-item">Speed: <span id="speed">0.00</span> m/s</div>
+        <div class="output-item">Time: <span id="time">00:00:00</span></div>
+        <div class="output-item">Latitude: <span id="lat">-</span></div>
+        <div class="output-item">Longitude: <span id="long">-</span></div>
+        <div class="output-item">Accuracy: <span id="accuracy">-</span> m</div>
+        <div class="output-item">Total Distance: <span id="totalDistance">0.00</span> m</div>
+    </div>
+
+    <div id="summary" style="display:none;">
+        <h2>Tracking Summary</h2>
+        <p>Total Distance Traveled: <span id="summaryTotalDistance">0.00</span> m</p>
+        <p>Average Speed: <span id="summaryAverageSpeed">0.00</span> m/s</p>
+        <p>Start Time: <span id="summaryStartTime">-</span></p>
+        <p>End Time: <span id="summaryEndTime">-</span></p>
+        <p>Final Latitude: <span id="summaryFinalLat">-</span></p>
+        <p>Final Longitude: <span id="summaryFinalLong">-</span></p>
+    </div>
+
+    <script>
+        let watchID = null;
+        let previousPosition = null;
+        let previousTimestamp = null;
+        let totalDistance = 0; // Track total distance
+        let startTime = null; // Track the start time for the timer
+        let endTime = null; // Track the end time for the summary
+        let timerInterval = null; // To handle the timer update
+
+        // Minimum distance threshold to register meaningful movement
+        const minDistanceThreshold = 2.0; // 2 meters to avoid noise
+
+        // Function to calculate and update the speed and distance
+        function calculateSpeed(position) {
+            const currentTimestamp = position.timestamp;
+            const currentLatitude = position.coords.latitude;
+            const currentLongitude = position.coords.longitude;
+            const currentAccuracy = position.coords.accuracy;
+
+            // Display current position and accuracy
+            document.getElementById('lat').innerText = currentLatitude.toFixed(6);
+            document.getElementById('long').innerText = currentLongitude.toFixed(6);
+            document.getElementById('accuracy').innerText = currentAccuracy.toFixed(2);
+
+            // Ensure accuracy is sufficient before updating
+            if (currentAccuracy > 20) {
+                console.log('Skipping inaccurate reading: ', currentAccuracy);
+                return; // Ignore readings with low accuracy (> 20 meters)
+            }
+
+            // If we have a previous position, calculate speed and distance
+            if (previousPosition) {
+                const distance = haversineDistance(
+                    previousPosition.coords.latitude,
+                    previousPosition.coords.longitude,
+                    currentLatitude,
+                    currentLongitude
+                );
+
+                const timeElapsed = (currentTimestamp - previousTimestamp) / 1000; // time in seconds
+
+                if (distance > minDistanceThreshold && timeElapsed > 0) {
+                    const speed = (distance / timeElapsed);  // Speed in meters/second
+                    document.getElementById('speed').innerText = speed.toFixed(2); // Update speed in real-time
+                    totalDistance += distance; // Increment total distance
+                    document.getElementById('totalDistance').innerText = totalDistance.toFixed(2); // Update distance display
+                }
+            }
+
+            // Update previous position and timestamp for next calculation
+            previousPosition = position;
+            previousTimestamp = currentTimestamp;
+        }
+
+        // Haversine formula to calculate distance between two latitude/longitude points in meters
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Radius of the Earth in meters
+            const dLat = (lat2 - lat1) * (Math.PI / 180);
+            const dLon = (lon2 - lon1) * (Math.PI / 180);
+
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return R * c; // Distance in meters
+        }
+
+        function startTracking() {
+            resetSession(); // Reset previous session data before starting a new session
+            if (navigator.geolocation) {
+                watchID = navigator.geolocation.watchPosition(calculateSpeed, handleError, {
+                    enableHighAccuracy: true,
+                    maximumAge: 1000, // Update every second
+                    timeout: 5000
+                });
+                startTime = new Date(); // Set the start time when tracking starts
+                document.getElementById('startTracking').disabled = true;
+                document.getElementById('stopTracking').disabled = false;
+
+                // Start timer interval
+                timerInterval = setInterval(updateTimer, 1000); // Update timer every second
+            } else {
+                alert('Geolocation is not supported by your browser');
+            }
+        }
+
+        function stopTracking() {
+            if (watchID) {
+                navigator.geolocation.clearWatch(watchID);
+                watchID = null;
+                document.getElementById('startTracking').disabled = false;
+                document.getElementById('stopTracking').disabled = true;
+                endTime = new Date(); // Set end time when tracking stops
+                showSummary(); // Show the summary
+                resetDisplay();
+
+                // Stop the timer
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        // Reset the session for a fresh start
+        function resetSession() {
+            previousPosition = null;
+            previousTimestamp = null;
+            totalDistance = 0;
+            startTime = null;
+            endTime = null;
+        }
+
+        // Update the timer display dynamically
+        function updateTimer() {
+            const now = new Date();
+            const elapsed = Math.floor((now - startTime) / 1000); // Elapsed time in seconds
+
+            const hours = Math.floor(elapsed / 3600);
+            const minutes = Math.floor((elapsed % 3600) / 60);
+            const seconds = elapsed % 60;
+
+            document.getElementById('time').innerText = 
+                String(hours).padStart(2, '0') + ':' + 
+                String(minutes).padStart(2, '0') + ':' + 
+                String(seconds).padStart(2, '0');
+        }
+
+        // Show the tracking summary
+        function showSummary() {
+            const elapsedTimeInSeconds = Math.floor((endTime - startTime) / 1000); // Elapsed time in seconds
+            const averageSpeed = totalDistance / elapsedTimeInSeconds; // Calculate average speed
+
+            document.getElementById('summaryTotalDistance').innerText = totalDistance.toFixed(2); // Update total distance
+            document.getElementById('summaryAverageSpeed').innerText = averageSpeed.toFixed(2); // Update average speed
+            document.getElementById('summaryStartTime').innerText = startTime.toLocaleString(); // Display start time
+            document.getElementById('summaryEndTime').innerText = endTime.toLocaleString(); // Display end time
+            document.getElementById('summaryFinalLat').innerText = previousPosition ? previousPosition.coords.latitude.toFixed(6) : '-'; // Final latitude
+            document.getElementById('summaryFinalLong').innerText = previousPosition ? previousPosition.coords.longitude.toFixed(6) : '-'; // Final longitude
+
+            document.getElementById('summary').style.display = 'block';
+        }
+
+        function resetDisplay() {
+            document.getElementById('speed').innerText = '0.00';
+            document.getElementById('lat').innerText = '-';
+            document.getElementById('long').innerText = '-';
+            document.getElementById('accuracy').innerText = '-';
+            document.getElementById('totalDistance').innerText = '0.00';
+            document.getElementById('time').innerText = '00:00:00';
+        }
+
+        function handleError(error) {
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    alert('User denied the request for Geolocation.');
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    alert('Location information is unavailable.');
+                    break;
+                case error.TIMEOUT:
+                    alert('The request to get user location timed out.');
+                    break;
+                case error.UNKNOWN_ERROR:
+                    alert('An unknown error occurred.');
+                    break;
+            }
+        }
+
+        // Event listeners
+        document.getElementById('startTracking').addEventListener('click', startTracking);
+        document.getElementById('stopTracking').addEventListener('click', stopTracking);
+    </script>
+</body>
+</html>
